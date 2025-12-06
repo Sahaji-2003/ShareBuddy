@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, File as FileIcon, Trash2, Download, Plus, Loader2, Search, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, File as FileIcon, Trash2, Download, Plus, Loader2, Search, RefreshCw, Eye } from 'lucide-react';
 import { getRepo, getRepoFiles, uploadFile, deleteFile, downloadFile, type Repo, type FileRecord } from '../lib/db';
 import { LargeTextCreator } from '../components/LargeTextCreator';
 import { ProgressModal } from '../components/ProgressModal';
+import { FilePreviewModal } from '../components/FilePreviewModal';
 import { GlassCard } from '../components/ui/GlassCard';
 import { useToast } from '../components/ui/Toast';
 import { useConfirm } from '../components/ui/ConfirmDialog';
@@ -27,6 +28,7 @@ export function RepoPage() {
     const [isUploading, setIsUploading] = useState(false);
     const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
     const [showTextCreator, setShowTextCreator] = useState(false);
+    const [previewFile, setPreviewFile] = useState<FileRecord | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { showToast } = useToast();
@@ -333,14 +335,23 @@ export function RepoPage() {
                                         <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
                                         <div className="flex gap-1">
                                             <button
+                                                onClick={() => setPreviewFile(file)}
+                                                className="p-2 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors"
+                                                title="View"
+                                            >
+                                                <Eye className="h-4 w-4" />
+                                            </button>
+                                            <button
                                                 onClick={() => handleDownload(file)}
                                                 className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors"
+                                                title="Download"
                                             >
                                                 <Download className="h-4 w-4" />
                                             </button>
                                             <button
                                                 onClick={() => handleDeleteFile(file)}
                                                 className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                                                title="Delete"
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                             </button>
@@ -373,14 +384,23 @@ export function RepoPage() {
                                     </div>
                                     <div className="col-span-2 flex justify-end gap-1">
                                         <button
+                                            onClick={() => setPreviewFile(file)}
+                                            className="p-2 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors"
+                                            title="View"
+                                        >
+                                            <Eye className="h-4 w-4" />
+                                        </button>
+                                        <button
                                             onClick={() => handleDownload(file)}
                                             className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors"
+                                            title="Download"
                                         >
                                             <Download className="h-4 w-4" />
                                         </button>
                                         <button
                                             onClick={() => handleDeleteFile(file)}
                                             className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                                            title="Delete"
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </button>
@@ -399,6 +419,18 @@ export function RepoPage() {
                     projectCode={projectCode}
                     onCancel={() => setShowTextCreator(false)}
                     onComplete={handleTextCreated}
+                />
+            )}
+
+            {/* File Preview Modal */}
+            {previewFile && (
+                <FilePreviewModal
+                    file={previewFile}
+                    onClose={() => setPreviewFile(null)}
+                    onDownload={() => {
+                        setPreviewFile(null);
+                        handleDownload(previewFile);
+                    }}
                 />
             )}
         </div>
