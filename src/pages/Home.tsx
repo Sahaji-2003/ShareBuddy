@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Folder, Trash2, Loader2, Search, Shield } from 'lucide-react';
+import { Plus, Folder, Trash2, Loader2, Search, Shield, RefreshCw } from 'lucide-react';
 import { createRepo, getRepos, deleteRepo, getAllRepos, type Repo } from '../lib/db';
 import { GlassCard } from '../components/ui/GlassCard';
 import { useToast } from '../components/ui/Toast';
@@ -140,15 +140,25 @@ export function Home() {
                             {isAdmin && ' (all projects)'}
                         </p>
                     </div>
-                    {!isAdmin && (
+                    <div className="flex gap-2">
                         <button
-                            onClick={() => setIsCreating(true)}
-                            className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-500 active:scale-95"
+                            onClick={loadRepos}
+                            disabled={isLoading}
+                            className="p-2.5 rounded-xl border border-white/10 bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50"
+                            title="Refresh"
                         >
-                            <Plus className="mr-2 h-4 w-4" />
-                            New Repository
+                            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
                         </button>
-                    )}
+                        {!isAdmin && (
+                            <button
+                                onClick={() => setIsCreating(true)}
+                                className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-500 active:scale-95"
+                            >
+                                <Plus className="mr-2 h-4 w-4" />
+                                New Repository
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Search */}

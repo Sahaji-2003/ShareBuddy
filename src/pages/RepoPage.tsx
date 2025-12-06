@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Upload, FileText, File as FileIcon, Trash2, Download, Plus, Loader2, Search } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, File as FileIcon, Trash2, Download, Plus, Loader2, Search, RefreshCw } from 'lucide-react';
 import { getRepo, getRepoFiles, uploadFile, deleteFile, downloadFile, type Repo, type FileRecord } from '../lib/db';
 import { LargeTextCreator } from '../components/LargeTextCreator';
 import { ProgressModal } from '../components/ProgressModal';
@@ -233,6 +233,14 @@ export function RepoPage() {
 
                 <div className="flex flex-col sm:flex-row gap-2">
                     <button
+                        onClick={loadData}
+                        disabled={isLoading}
+                        className="p-2.5 rounded-xl border border-white/10 bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50"
+                        title="Refresh files"
+                    >
+                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                    <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
                         className="flex-1 sm:flex-none inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-500 disabled:opacity-50"
@@ -358,7 +366,7 @@ export function RepoPage() {
                                     <div className="col-span-2 text-gray-500 truncate text-xs">
                                         {file.type || 'Unknown'}
                                     </div>
-                                    <div className="col-span-2 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="col-span-2 flex justify-end gap-1">
                                         <button
                                             onClick={() => handleDownload(file)}
                                             className="p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors"
