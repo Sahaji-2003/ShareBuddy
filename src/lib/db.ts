@@ -165,7 +165,8 @@ export const uploadFile = async (
     projectCode: string,
     repoId: string,
     file: File | Blob,
-    fileName: string
+    fileName: string,
+    onProgress?: (progress: number) => void
 ): Promise<FileRecord> => {
     // Check storage limit
     const { percentage } = await getStorageUsage(projectCode);
@@ -176,12 +177,21 @@ export const uploadFile = async (
     const fileId = crypto.randomUUID();
     const storagePath = `${projectCode}/${fileId}`;
 
-    // Upload to storage
-    const { error: uploadError } = await supabase.storage
-        .from('files')
-        .upload(storagePath, file);
+    // For large files (> 6MB), use resumable upload
+    const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB chunks
 
-    if (uploadError) throw uploadError;
+    if (file.size > CHUNK_SIZE) {
+        // Use resumable upload (TUS protocol)
+        await uploadResumable(storagePath, file, onProgress);
+    } else {
+        // Standard upload for small files
+        const { error: uploadError } = await supabase.storage
+            .from('files')
+            .upload(storagePath, file);
+
+        if (uploadError) throw uploadError;
+        if (onProgress) onProgress(100);
+    }
 
     // Save metadata
     const { data, error } = await supabase
@@ -199,6 +209,59 @@ export const uploadFile = async (
 
     if (error) throw error;
     return data;
+};
+
+// Resumable upload for large files using TUS protocol
+const uploadResumable = (
+    storagePath: string,
+    file: File | Blob,
+    onProgress?: (progress: number) => void
+): Promise<void> => {
+    return new Promise((resolve, reject) => {
+        const projectId = import.meta.env.VITE_SUPABASE_URL?.replace('https://', '').split('.')[0];
+        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+        // Dynamic import to avoid SSR issues
+        import('tus-js-client').then(({ Upload }) => {
+            const upload = new Upload(file, {
+                endpoint: `https://${projectId}.supabase.co/storage/v1/upload/resumable`,
+                retryDelays: [0, 3000, 5000, 10000, 20000],
+                headers: {
+                    authorization: `Bearer ${anonKey}`,
+                    'x-upsert': 'true'
+                },
+                uploadDataDuringCreation: true,
+                removeFingerprintOnSuccess: true,
+                metadata: {
+                    bucketName: 'files',
+                    objectName: storagePath,
+                    contentType: file.type || 'application/octet-stream',
+                    cacheControl: '3600'
+                },
+                chunkSize: 6 * 1024 * 1024, // 6MB chunks
+                onError: (error) => {
+                    console.error('Upload failed:', error);
+                    reject(error);
+                },
+                onProgress: (bytesUploaded, bytesTotal) => {
+                    const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
+                    if (onProgress) onProgress(percentage);
+                },
+                onSuccess: () => {
+                    if (onProgress) onProgress(100);
+                    resolve();
+                }
+            });
+
+            // Check for previous uploads to resume
+            upload.findPreviousUploads().then((previousUploads) => {
+                if (previousUploads.length) {
+                    upload.resumeFromPreviousUpload(previousUploads[0]);
+                }
+                upload.start();
+            });
+        }).catch(reject);
+    });
 };
 
 export const getRepoFiles = async (repoId: string): Promise<FileRecord[]> => {
