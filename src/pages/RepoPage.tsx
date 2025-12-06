@@ -3,10 +3,20 @@ import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Upload, FileText, File as FileIcon, Trash2, Download, Plus, Loader2, Search } from 'lucide-react';
 import { getRepo, getRepoFiles, uploadFile, deleteFile, downloadFile, type Repo, type FileRecord } from '../lib/db';
 import { LargeTextCreator } from '../components/LargeTextCreator';
+import { ProgressModal } from '../components/ProgressModal';
 import { GlassCard } from '../components/ui/GlassCard';
 import { useToast } from '../components/ui/Toast';
 import { useConfirm } from '../components/ui/ConfirmDialog';
 import { useProject } from '../contexts/ProjectContext';
+
+interface TransferProgress {
+    type: 'upload' | 'download';
+    fileName: string;
+    fileSize: number;
+    progress: number;
+    startTime: number;
+    estimatedTimeRemaining: string;
+}
 
 export function RepoPage() {
     const { id } = useParams<{ id: string }>();
@@ -15,6 +25,7 @@ export function RepoPage() {
     const [filteredFiles, setFilteredFiles] = useState<FileRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
+    const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
     const [showTextCreator, setShowTextCreator] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,7 +40,6 @@ export function RepoPage() {
     }, [id]);
 
     useEffect(() => {
-        // Filter files based on search
         if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase();
             setFilteredFiles(
@@ -58,14 +68,44 @@ export function RepoPage() {
         }
     };
 
+    const formatTimeRemaining = (seconds: number): string => {
+        if (!isFinite(seconds) || seconds < 0) return 'Calculating...';
+        if (seconds < 60) return `${Math.ceil(seconds)}s`;
+        if (seconds < 3600) return `${Math.ceil(seconds / 60)}m ${Math.ceil(seconds % 60)}s`;
+        return `${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m`;
+    };
+
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || !e.target.files.length || !id || !projectCode) return;
 
+        const file = e.target.files[0];
+        const startTime = Date.now();
+
         setIsUploading(true);
+        setTransferProgress({
+            type: 'upload',
+            fileName: file.name,
+            fileSize: file.size,
+            progress: 0,
+            startTime,
+            estimatedTimeRemaining: 'Calculating...'
+        });
 
         try {
-            const file = e.target.files[0];
-            await uploadFile(projectCode, id, file, file.name);
+            await uploadFile(projectCode, id, file, file.name, (progress) => {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const rate = progress / elapsed;
+                const remaining = (100 - progress) / rate;
+
+                setTransferProgress({
+                    type: 'upload',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    progress,
+                    startTime,
+                    estimatedTimeRemaining: progress < 100 ? formatTimeRemaining(remaining) : 'Complete!'
+                });
+            });
             showToast(`${file.name} uploaded!`, 'success');
             loadData();
         } catch (err) {
@@ -73,6 +113,7 @@ export function RepoPage() {
             showToast('Upload failed', 'error');
         } finally {
             setIsUploading(false);
+            setTransferProgress(null);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
@@ -80,7 +121,7 @@ export function RepoPage() {
     const handleDeleteFile = async (file: FileRecord) => {
         const confirmed = await confirm({
             title: 'Delete File',
-            message: `Delete "${file.name}"? This cannot be undone.`,
+            message: `Are you sure you want to delete "${file.name}"?`,
             confirmText: 'Delete',
             cancelText: 'Cancel',
         });
@@ -98,15 +139,45 @@ export function RepoPage() {
     };
 
     const handleDownload = async (file: FileRecord) => {
+        const startTime = Date.now();
+
+        setTransferProgress({
+            type: 'download',
+            fileName: file.name,
+            fileSize: file.size,
+            progress: 0,
+            startTime,
+            estimatedTimeRemaining: 'Calculating...'
+        });
+
         try {
-            showToast(file.is_chunked
-                ? `Downloading ${file.name} (${file.chunk_count} chunks)...`
-                : `Downloading ${file.name}...`, 'info');
-            await downloadFile(file);
+            await downloadFile(file, (progress, downloaded, total) => {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const rate = downloaded / elapsed;
+                const remainingBytes = total - downloaded;
+                const remaining = remainingBytes / rate;
+
+                setTransferProgress({
+                    type: 'download',
+                    fileName: file.name,
+                    fileSize: file.size,
+                    progress,
+                    startTime,
+                    estimatedTimeRemaining: progress < 100 ? formatTimeRemaining(remaining) : 'Complete!'
+                });
+            });
+            showToast(`${file.name} downloaded!`, 'success');
         } catch (err) {
             console.error(err);
             showToast('Download failed', 'error');
+        } finally {
+            setTransferProgress(null);
         }
+    };
+
+    const handleTextCreated = () => {
+        setShowTextCreator(false);
+        loadData();
     };
 
     if (isLoading) {
@@ -130,6 +201,17 @@ export function RepoPage() {
 
     return (
         <div className="space-y-6 relative">
+            {/* Progress Modal */}
+            {transferProgress && (
+                <ProgressModal
+                    type={transferProgress.type}
+                    fileName={transferProgress.fileName}
+                    fileSize={transferProgress.fileSize}
+                    progress={transferProgress.progress}
+                    estimatedTimeRemaining={transferProgress.estimatedTimeRemaining}
+                />
+            )}
+
             {/* Subtle background */}
             <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
                 <div className="absolute top-[10%] right-[5%] w-[40%] h-[40%] rounded-full bg-blue-500/10 blur-[150px]" />
@@ -200,7 +282,6 @@ export function RepoPage() {
 
             {/* Files List */}
             <GlassCard className="p-0 overflow-hidden">
-                {/* Desktop Header */}
                 <div className="hidden sm:grid grid-cols-12 gap-4 border-b border-white/5 bg-white/5 p-4 text-sm font-medium text-gray-500">
                     <div className="col-span-6">Name</div>
                     <div className="col-span-2">Size</div>
@@ -265,6 +346,11 @@ export function RepoPage() {
                                             )}
                                         </div>
                                         <span className="truncate font-medium text-white">{file.name}</span>
+                                        {file.is_chunked && (
+                                            <span className="text-xs text-purple-400 bg-purple-500/20 px-2 py-0.5 rounded">
+                                                {file.chunk_count} chunks
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="col-span-2 text-gray-500 font-mono text-xs">
                                         {(file.size / 1024 / 1024).toFixed(2)} MB
@@ -293,16 +379,13 @@ export function RepoPage() {
                 </div>
             </GlassCard>
 
+            {/* Large Text Creator Modal */}
             {showTextCreator && id && projectCode && (
                 <LargeTextCreator
                     repoId={id}
                     projectCode={projectCode}
-                    onComplete={() => {
-                        setShowTextCreator(false);
-                        loadData();
-                        showToast('Text file created!', 'success');
-                    }}
                     onCancel={() => setShowTextCreator(false)}
+                    onComplete={handleTextCreated}
                 />
             )}
         </div>

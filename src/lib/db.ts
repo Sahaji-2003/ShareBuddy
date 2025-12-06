@@ -378,7 +378,10 @@ export const deleteFile = async (fileId: string, storagePath: string | null, isC
     if (error) throw error;
 };
 
-export const downloadFile = async (file: FileRecord): Promise<void> => {
+export const downloadFile = async (
+    file: FileRecord,
+    onProgress?: (progress: number, downloaded: number, total: number) => void
+): Promise<void> => {
     let blob: Blob;
 
     if (file.is_chunked && file.chunk_count) {
@@ -392,9 +395,13 @@ export const downloadFile = async (file: FileRecord): Promise<void> => {
         if (chunksError) throw chunksError;
         if (!chunks || chunks.length === 0) throw new Error('No chunks found');
 
-        // Download each chunk
+        // Download each chunk with progress
         const chunkBlobs: Blob[] = [];
-        for (const chunk of chunks) {
+        let downloadedBytes = 0;
+        const totalBytes = file.size;
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
             if (!chunk.storage_path) continue;
 
             const { data, error } = await supabase.storage
@@ -403,18 +410,27 @@ export const downloadFile = async (file: FileRecord): Promise<void> => {
 
             if (error) throw error;
             chunkBlobs.push(data);
+
+            downloadedBytes += chunk.size || data.size;
+            if (onProgress) {
+                const progress = Math.round((downloadedBytes / totalBytes) * 100);
+                onProgress(progress, downloadedBytes, totalBytes);
+            }
         }
 
         // Merge chunks back into original file
         blob = await mergeChunks(chunkBlobs, file.type || 'application/octet-stream');
     } else if (file.storage_path) {
-        // Download single file
+        // For single files, we can't track progress easily, so just report 50% -> 100%
+        if (onProgress) onProgress(50, file.size / 2, file.size);
+
         const { data, error } = await supabase.storage
             .from('files')
             .download(file.storage_path);
 
         if (error) throw error;
         blob = data;
+        if (onProgress) onProgress(100, file.size, file.size);
     } else {
         throw new Error('No storage path found');
     }
