@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Download, AlertTriangle, Loader2, FileText, Image as ImageIcon, Code } from 'lucide-react';
+import { X, Download, AlertTriangle, Loader2, FileText, Image as ImageIcon, Code, Edit2, Save } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { type FileRecord } from '../lib/db';
 
@@ -7,29 +7,33 @@ interface FilePreviewModalProps {
     file: FileRecord;
     onClose: () => void;
     onDownload: () => void;
+    onFileUpdated?: () => void;
 }
 
 const MAX_PREVIEW_SIZE = 20 * 1024 * 1024; // 20MB
 
-export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModalProps) {
+export function FilePreviewModal({ file, onClose, onDownload, onFileUpdated }: FilePreviewModalProps) {
     const [content, setContent] = useState<string | null>(null);
+    const [editedContent, setEditedContent] = useState<string>('');
     const [imageUrl, setImageUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const isLargeFile = file.size > MAX_PREVIEW_SIZE || file.is_chunked;
     const isTextFile = file.type?.startsWith('text/') ||
-        ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.py', '.html', '.css', '.sql', '.csv', '.xml', '.yaml', '.yml', '.sh', '.bat', '.log']
+        ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.py', '.html', '.css', '.sql', '.csv', '.xml', '.yaml', '.yml', '.sh', '.bat', '.log', '.env', '.gitignore', '.conf', '.ini', '.toml']
             .some(ext => file.name.toLowerCase().endsWith(ext));
     const isImageFile = file.type?.startsWith('image/');
     const isJsonFile = file.name.toLowerCase().endsWith('.json') || file.type === 'application/json';
+    const canEdit = isTextFile && !isLargeFile && !file.is_chunked;
 
     useEffect(() => {
         if (isLargeFile) {
             setIsLoading(false);
             return;
         }
-
         loadFileContent();
     }, [file]);
 
@@ -53,6 +57,7 @@ export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModal
 
                 const text = await data.text();
                 setContent(text);
+                setEditedContent(text);
             } else {
                 setError('Preview not available for this file type');
             }
@@ -64,6 +69,48 @@ export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModal
         }
     };
 
+    const handleSave = async () => {
+        if (!file.storage_path || !canEdit) return;
+
+        setIsSaving(true);
+        try {
+            // Create a new blob with the edited content
+            const blob = new Blob([editedContent], { type: file.type || 'text/plain' });
+
+            // Upload and overwrite the existing file
+            const { error: uploadError } = await supabase.storage
+                .from('files')
+                .update(file.storage_path, blob, {
+                    cacheControl: '0',
+                    upsert: true
+                });
+
+            if (uploadError) throw uploadError;
+
+            // Update file size in metadata
+            const { error: updateError } = await supabase
+                .from('files')
+                .update({ size: blob.size })
+                .eq('id', file.id);
+
+            if (updateError) throw updateError;
+
+            setContent(editedContent);
+            setIsEditing(false);
+            if (onFileUpdated) onFileUpdated();
+        } catch (err) {
+            console.error('Failed to save file:', err);
+            setError('Failed to save changes');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleCancelEdit = () => {
+        setEditedContent(content || '');
+        setIsEditing(false);
+    };
+
     const formatJson = (text: string): string => {
         try {
             return JSON.stringify(JSON.parse(text), null, 2);
@@ -71,6 +118,8 @@ export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModal
             return text;
         }
     };
+
+    const hasChanges = editedContent !== content;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -91,17 +140,53 @@ export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModal
                             <h3 className="font-semibold text-white truncate">{file.name}</h3>
                             <p className="text-xs text-gray-500">
                                 {(file.size / 1024 / 1024).toFixed(2)} MB • {file.type || 'Unknown type'}
+                                {isEditing && <span className="text-yellow-400 ml-2">• Editing</span>}
                             </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button
-                            onClick={onDownload}
-                            className="p-2 rounded-lg hover:bg-white/10 text-blue-400 transition-colors"
-                            title="Download"
-                        >
-                            <Download className="h-5 w-5" />
-                        </button>
+                        {isEditing ? (
+                            <>
+                                <button
+                                    onClick={handleCancelEdit}
+                                    disabled={isSaving}
+                                    className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:bg-white/10 transition-colors disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    disabled={isSaving || !hasChanges}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm bg-green-600 text-white hover:bg-green-500 transition-colors disabled:opacity-50"
+                                >
+                                    {isSaving ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Save className="h-4 w-4" />
+                                    )}
+                                    Save
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                {canEdit && content !== null && (
+                                    <button
+                                        onClick={() => setIsEditing(true)}
+                                        className="p-2 rounded-lg hover:bg-white/10 text-green-400 transition-colors"
+                                        title="Edit"
+                                    >
+                                        <Edit2 className="h-5 w-5" />
+                                    </button>
+                                )}
+                                <button
+                                    onClick={onDownload}
+                                    className="p-2 rounded-lg hover:bg-white/10 text-blue-400 transition-colors"
+                                    title="Download"
+                                >
+                                    <Download className="h-5 w-5" />
+                                </button>
+                            </>
+                        )}
                         <button
                             onClick={onClose}
                             className="p-2 rounded-lg hover:bg-white/10 text-gray-400 transition-colors"
@@ -160,9 +245,18 @@ export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModal
                             />
                         </div>
                     ) : content !== null ? (
-                        <pre className="p-4 bg-black/30 rounded-xl text-sm text-gray-300 font-mono overflow-auto whitespace-pre-wrap break-words max-h-[60vh]">
-                            {isJsonFile ? formatJson(content) : content}
-                        </pre>
+                        isEditing ? (
+                            <textarea
+                                value={editedContent}
+                                onChange={(e) => setEditedContent(e.target.value)}
+                                className="w-full h-[60vh] p-4 bg-black/30 rounded-xl text-sm text-gray-300 font-mono resize-none border border-white/10 focus:border-green-500/50 focus:outline-none focus:ring-2 focus:ring-green-500/20"
+                                spellCheck={false}
+                            />
+                        ) : (
+                            <pre className="p-4 bg-black/30 rounded-xl text-sm text-gray-300 font-mono overflow-auto whitespace-pre-wrap break-words max-h-[60vh]">
+                                {isJsonFile ? formatJson(content) : content}
+                            </pre>
+                        )
                     ) : (
                         <div className="flex flex-col items-center justify-center py-20 text-center">
                             <p className="text-gray-500">No preview available</p>
@@ -176,6 +270,13 @@ export function FilePreviewModal({ file, onClose, onDownload }: FilePreviewModal
                         </div>
                     )}
                 </div>
+
+                {/* Footer hint for edit mode */}
+                {isEditing && (
+                    <div className="px-4 py-2 border-t border-white/10 bg-white/5 text-xs text-gray-500 text-center">
+                        Press <kbd className="px-1.5 py-0.5 bg-white/10 rounded">Ctrl+S</kbd> or click Save to save changes
+                    </div>
+                )}
             </div>
 
             <style>{`

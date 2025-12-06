@@ -431,6 +431,7 @@ export function RepoPage() {
                         setPreviewFile(null);
                         handleDownload(previewFile);
                     }}
+                    onFileUpdated={loadData}
                 />
             )}
         </div>
