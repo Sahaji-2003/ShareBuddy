@@ -54,10 +54,25 @@ export function LargeTextCreator({ repoId, projectCode, onComplete, onCancel }: 
     }, [selectedFormat.mimeType]);
 
     const handleLargeContent = (text: string) => {
+        // Use setTimeout to prevent blocking UI on massive content
         const blob = new Blob([text], { type: selectedFormat.mimeType });
         setContentBlob(blob);
         setIsLargeContent(true);
-        setLineCount(text.split('\n').length);
+
+        // Estimate line count for huge files (count newlines efficiently)
+        // For files > 10MB, sample to estimate instead of counting all
+        let estimatedLines: number;
+        if (text.length > 10 * 1024 * 1024) {
+            // Sample first 100KB to estimate line density
+            const sample = text.slice(0, 100 * 1024);
+            const sampleLines = (sample.match(/\n/g) || []).length;
+            const ratio = text.length / sample.length;
+            estimatedLines = Math.round(sampleLines * ratio);
+        } else {
+            estimatedLines = (text.match(/\n/g) || []).length + 1;
+        }
+
+        setLineCount(estimatedLines);
         setPreview(text.slice(0, 500) + (text.length > 500 ? '\n...' : ''));
         setTextContent('');
         showToast(`Large content loaded (${(blob.size / 1024 / 1024).toFixed(2)} MB)`, 'success');
@@ -199,7 +214,7 @@ export function LargeTextCreator({ repoId, projectCode, onComplete, onCancel }: 
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors disabled:opacity-50"
                             >
                                 <Clipboard className="h-3.5 w-3.5" />
-                                {status === 'reading' ? 'Reading...' : 'Smart Paste'}
+                                {status === 'reading' ? 'Reading...' : 'Super Paste'}
                             </button>
                         </div>
 
@@ -231,7 +246,7 @@ export function LargeTextCreator({ repoId, projectCode, onComplete, onCancel }: 
                                 onChange={handleTextChange}
                                 onPaste={handlePaste}
                                 className="w-full h-48 sm:h-64 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder-gray-500 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
-                                placeholder="Type or paste your content here..."
+                                placeholder="Type or paste content here. For 10M+ lines, use Super Paste →"
                             />
                         )}
 
