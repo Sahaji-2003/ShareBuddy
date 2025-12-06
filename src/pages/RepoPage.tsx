@@ -88,7 +88,7 @@ export function RepoPage() {
         if (!confirmed) return;
 
         try {
-            await deleteFile(file.id, file.storagePath);
+            await deleteFile(file.id, file.storage_path);
             showToast('File deleted', 'success');
             loadData();
         } catch (err) {
@@ -100,7 +100,9 @@ export function RepoPage() {
     const handleDownload = async (file: FileRecord) => {
         try {
             showToast(`Downloading ${file.name}...`, 'info');
-            await downloadFile(file.downloadUrl, file.name);
+            if (file.storage_path) {
+                await downloadFile(file.storage_path, file.name);
+            }
         } catch (err) {
             console.error(err);
             showToast('Download failed', 'error');
@@ -225,7 +227,7 @@ export function RepoPage() {
                                 <div className="sm:hidden p-4 space-y-2">
                                     <div className="flex items-center gap-3">
                                         <div className="p-2 rounded-lg bg-blue-500/20">
-                                            {file.type.startsWith('text/') ? (
+                                            {file.type?.startsWith('text/') ? (
                                                 <FileText className="h-4 w-4 text-blue-400" />
                                             ) : (
                                                 <FileIcon className="h-4 w-4 text-orange-400" />
@@ -256,7 +258,7 @@ export function RepoPage() {
                                 <div className="hidden sm:grid grid-cols-12 gap-4 p-4 text-sm items-center">
                                     <div className="col-span-6 flex items-center gap-3 overflow-hidden">
                                         <div className="p-2 rounded-lg bg-blue-500/20">
-                                            {file.type.startsWith('text/') ? (
+                                            {file.type?.startsWith('text/') ? (
                                                 <FileText className="h-4 w-4 text-blue-400" />
                                             ) : (
                                                 <FileIcon className="h-4 w-4 text-orange-400" />

@@ -6,6 +6,7 @@ import { GlassCard } from '../components/ui/GlassCard';
 import { useToast } from '../components/ui/Toast';
 import { useConfirm } from '../components/ui/ConfirmDialog';
 import { useProject } from '../contexts/ProjectContext';
+import { StorageWarning } from '../components/StorageWarning';
 
 export function Home() {
     const [repos, setRepos] = useState<Repo[]>([]);
@@ -34,7 +35,7 @@ export function Home() {
                 repos.filter(
                     (repo) =>
                         repo.name.toLowerCase().includes(query) ||
-                        repo.description.toLowerCase().includes(query)
+                        (repo.description || '').toLowerCase().includes(query)
                 )
             );
         } else {
@@ -113,6 +114,9 @@ export function Home() {
             <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
                 <div className="absolute -top-[30%] -left-[20%] w-[60%] h-[60%] rounded-full bg-blue-500/10 blur-[150px]" />
             </div>
+
+            {/* Storage Warning */}
+            <StorageWarning />
 
             {/* Header */}
             <div className="flex flex-col gap-4">
@@ -213,7 +217,7 @@ export function Home() {
                                 <p className="text-sm text-gray-500 line-clamp-2">{repo.description || 'No description'}</p>
                             </div>
                             <div className="text-xs text-gray-600 pt-3 mt-3 border-t border-white/5">
-                                Created {repo.createdAt.toLocaleDateString()}
+                                Created {new Date(repo.created_at).toLocaleDateString()}
                             </div>
                         </GlassCard>
                     </Link>
