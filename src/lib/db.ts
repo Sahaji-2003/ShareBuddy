@@ -204,7 +204,7 @@ export const uploadFile = async (
     repoId: string,
     file: File | Blob,
     fileName: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number, bytesUploaded: number, totalBytes: number) => void
 ): Promise<FileRecord> => {
     // Check storage limit
     const { percentage } = await getStorageUsage(projectCode);
@@ -228,7 +228,7 @@ export const uploadFile = async (
         .upload(storagePath, file);
 
     if (uploadError) throw uploadError;
-    if (onProgress) onProgress(100);
+    if (onProgress) onProgress(100, file.size, file.size);
 
     // Save metadata
     const { data, error } = await supabase
@@ -259,11 +259,13 @@ const uploadChunkedFile = async (
     file: File | Blob,
     fileName: string,
     fileType: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number, bytesUploaded: number, totalBytes: number) => void
 ): Promise<FileRecord> => {
     const chunks = splitFileIntoChunks(file);
     const parentFileId = crypto.randomUUID();
     let uploadedChunks = 0;
+    let bytesUploaded = 0;
+    const totalBytes = file.size;
 
     // First, create the parent file record
     const { data: parentFile, error: parentError } = await supabase
@@ -322,8 +324,10 @@ const uploadChunkedFile = async (
         if (chunkError) throw chunkError;
 
         uploadedChunks++;
+        bytesUploaded += chunk.size;
         if (onProgress) {
-            onProgress(Math.round((uploadedChunks / chunks.length) * 100));
+            const progress = Math.round((bytesUploaded / totalBytes) * 100);
+            onProgress(progress, bytesUploaded, totalBytes);
         }
     }
 

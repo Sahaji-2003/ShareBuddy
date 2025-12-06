@@ -81,6 +81,10 @@ export function RepoPage() {
         const file = e.target.files[0];
         const startTime = Date.now();
 
+        // Estimate initial ETA assuming ~500KB/s upload speed (conservative)
+        const estimatedSpeed = 500 * 1024; // 500 KB/s
+        const initialETA = file.size / estimatedSpeed;
+
         setIsUploading(true);
         setTransferProgress({
             type: 'upload',
@@ -88,14 +92,15 @@ export function RepoPage() {
             fileSize: file.size,
             progress: 0,
             startTime,
-            estimatedTimeRemaining: 'Calculating...'
+            estimatedTimeRemaining: `~${formatTimeRemaining(initialETA)}`
         });
 
         try {
-            await uploadFile(projectCode, id, file, file.name, (progress) => {
-                const elapsed = (Date.now() - startTime) / 1000;
-                const rate = progress / elapsed;
-                const remaining = (100 - progress) / rate;
+            await uploadFile(projectCode, id, file, file.name, (progress, bytesUploaded, totalBytes) => {
+                const elapsed = (Date.now() - startTime) / 1000; // seconds
+                const bytesPerSecond = bytesUploaded / elapsed;
+                const remainingBytes = totalBytes - bytesUploaded;
+                const remainingSeconds = remainingBytes / bytesPerSecond;
 
                 setTransferProgress({
                     type: 'upload',
@@ -103,7 +108,7 @@ export function RepoPage() {
                     fileSize: file.size,
                     progress,
                     startTime,
-                    estimatedTimeRemaining: progress < 100 ? formatTimeRemaining(remaining) : 'Complete!'
+                    estimatedTimeRemaining: progress < 100 ? formatTimeRemaining(remainingSeconds) : 'Complete!'
                 });
             });
             showToast(`${file.name} uploaded!`, 'success');
