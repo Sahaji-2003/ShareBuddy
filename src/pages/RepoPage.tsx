@@ -88,7 +88,7 @@ export function RepoPage() {
         if (!confirmed) return;
 
         try {
-            await deleteFile(file.id, file.storage_path);
+            await deleteFile(file.id, file.storage_path, file.is_chunked);
             showToast('File deleted', 'success');
             loadData();
         } catch (err) {
@@ -99,10 +99,10 @@ export function RepoPage() {
 
     const handleDownload = async (file: FileRecord) => {
         try {
-            showToast(`Downloading ${file.name}...`, 'info');
-            if (file.storage_path) {
-                await downloadFile(file.storage_path, file.name);
-            }
+            showToast(file.is_chunked
+                ? `Downloading ${file.name} (${file.chunk_count} chunks)...`
+                : `Downloading ${file.name}...`, 'info');
+            await downloadFile(file);
         } catch (err) {
             console.error(err);
             showToast('Download failed', 'error');

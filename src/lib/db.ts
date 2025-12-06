@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { splitFileIntoChunks, mergeChunks, needsChunking } from './chunking';
 
 // Types
 export interface Project {
@@ -23,6 +24,11 @@ export interface FileRecord {
     size: number;
     storage_path: string | null;
     created_at: string;
+    // Chunking fields
+    is_chunked: boolean;
+    chunk_count: number | null;
+    parent_file_id: string | null;
+    chunk_index: number | null;
 }
 
 // Storage limit (1GB in bytes)
@@ -206,24 +212,23 @@ export const uploadFile = async (
         throw new Error('Storage limit reached. Please delete some files.');
     }
 
+    const fileType = file.type || 'application/octet-stream';
+
+    // Check if file needs chunking (> 45MB)
+    if (needsChunking(file)) {
+        return uploadChunkedFile(projectCode, repoId, file, fileName, fileType, onProgress);
+    }
+
+    // Standard upload for small files
     const fileId = crypto.randomUUID();
     const storagePath = `${projectCode}/${fileId}`;
 
-    // For large files (> 6MB), use resumable upload
-    const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB chunks
+    const { error: uploadError } = await supabase.storage
+        .from('files')
+        .upload(storagePath, file);
 
-    if (file.size > CHUNK_SIZE) {
-        // Use resumable upload (TUS protocol)
-        await uploadResumable(storagePath, file, onProgress);
-    } else {
-        // Standard upload for small files
-        const { error: uploadError } = await supabase.storage
-            .from('files')
-            .upload(storagePath, file);
-
-        if (uploadError) throw uploadError;
-        if (onProgress) onProgress(100);
-    }
+    if (uploadError) throw uploadError;
+    if (onProgress) onProgress(100);
 
     // Save metadata
     const { data, error } = await supabase
@@ -232,9 +237,13 @@ export const uploadFile = async (
             repo_id: repoId,
             project_code: projectCode,
             name: fileName,
-            type: file.type || 'application/octet-stream',
+            type: fileType,
             size: file.size,
-            storage_path: storagePath
+            storage_path: storagePath,
+            is_chunked: false,
+            chunk_count: null,
+            parent_file_id: null,
+            chunk_index: null
         })
         .select()
         .single();
@@ -243,57 +252,82 @@ export const uploadFile = async (
     return data;
 };
 
-// Resumable upload for large files using TUS protocol
-const uploadResumable = (
-    storagePath: string,
+// Upload a large file as multiple chunks
+const uploadChunkedFile = async (
+    projectCode: string,
+    repoId: string,
     file: File | Blob,
+    fileName: string,
+    fileType: string,
     onProgress?: (progress: number) => void
-): Promise<void> => {
-    return new Promise((resolve, reject) => {
-        const projectId = import.meta.env.VITE_SUPABASE_URL?.replace('https://', '').split('.')[0];
-        const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+): Promise<FileRecord> => {
+    const chunks = splitFileIntoChunks(file);
+    const parentFileId = crypto.randomUUID();
+    let uploadedChunks = 0;
 
-        // Dynamic import to avoid SSR issues
-        import('tus-js-client').then(({ Upload }) => {
-            const upload = new Upload(file, {
-                endpoint: `https://${projectId}.supabase.co/storage/v1/upload/resumable`,
-                retryDelays: [0, 3000, 5000, 10000, 20000],
-                headers: {
-                    authorization: `Bearer ${anonKey}`,
-                    'x-upsert': 'true'
-                },
-                uploadDataDuringCreation: true,
-                removeFingerprintOnSuccess: true,
-                metadata: {
-                    bucketName: 'files',
-                    objectName: storagePath,
-                    contentType: file.type || 'application/octet-stream',
-                    cacheControl: '3600'
-                },
-                chunkSize: 6 * 1024 * 1024, // 6MB chunks
-                onError: (error) => {
-                    console.error('Upload failed:', error);
-                    reject(error);
-                },
-                onProgress: (bytesUploaded, bytesTotal) => {
-                    const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
-                    if (onProgress) onProgress(percentage);
-                },
-                onSuccess: () => {
-                    if (onProgress) onProgress(100);
-                    resolve();
-                }
+    // First, create the parent file record
+    const { data: parentFile, error: parentError } = await supabase
+        .from('files')
+        .insert({
+            id: parentFileId,
+            repo_id: repoId,
+            project_code: projectCode,
+            name: fileName,
+            type: fileType,
+            size: file.size,
+            storage_path: null, // Parent has no direct storage
+            is_chunked: true,
+            chunk_count: chunks.length,
+            parent_file_id: null,
+            chunk_index: null
+        })
+        .select()
+        .single();
+
+    if (parentError) throw parentError;
+
+    // Upload each chunk
+    for (const chunk of chunks) {
+        const chunkId = crypto.randomUUID();
+        const storagePath = `${projectCode}/${parentFileId}/chunk_${chunk.index}`;
+
+        // Upload chunk to storage
+        const { error: uploadError } = await supabase.storage
+            .from('files')
+            .upload(storagePath, chunk.blob);
+
+        if (uploadError) {
+            // Cleanup on failure
+            console.error('Chunk upload failed:', uploadError);
+            throw uploadError;
+        }
+
+        // Save chunk metadata
+        const { error: chunkError } = await supabase
+            .from('files')
+            .insert({
+                id: chunkId,
+                repo_id: repoId,
+                project_code: projectCode,
+                name: `${fileName}.chunk.${chunk.index}`,
+                type: fileType,
+                size: chunk.size,
+                storage_path: storagePath,
+                is_chunked: false,
+                chunk_count: null,
+                parent_file_id: parentFileId,
+                chunk_index: chunk.index
             });
 
-            // Check for previous uploads to resume
-            upload.findPreviousUploads().then((previousUploads) => {
-                if (previousUploads.length) {
-                    upload.resumeFromPreviousUpload(previousUploads[0]);
-                }
-                upload.start();
-            });
-        }).catch(reject);
-    });
+        if (chunkError) throw chunkError;
+
+        uploadedChunks++;
+        if (onProgress) {
+            onProgress(Math.round((uploadedChunks / chunks.length) * 100));
+        }
+    }
+
+    return parentFile;
 };
 
 export const getRepoFiles = async (repoId: string): Promise<FileRecord[]> => {
@@ -301,19 +335,41 @@ export const getRepoFiles = async (repoId: string): Promise<FileRecord[]> => {
         .from('files')
         .select('*')
         .eq('repo_id', repoId)
+        .is('parent_file_id', null) // Only get top-level files, not chunks
         .order('created_at', { ascending: false });
 
     if (error) throw error;
     return data || [];
 };
 
-export const deleteFile = async (fileId: string, storagePath: string | null): Promise<void> => {
-    // Delete from storage
-    if (storagePath) {
+export const deleteFile = async (fileId: string, storagePath: string | null, isChunked: boolean = false): Promise<void> => {
+    if (isChunked) {
+        // Get all chunks for this file
+        const { data: chunks } = await supabase
+            .from('files')
+            .select('id, storage_path')
+            .eq('parent_file_id', fileId);
+
+        // Delete each chunk from storage
+        if (chunks) {
+            for (const chunk of chunks) {
+                if (chunk.storage_path) {
+                    await supabase.storage.from('files').remove([chunk.storage_path]);
+                }
+            }
+        }
+
+        // Delete chunk metadata
+        await supabase
+            .from('files')
+            .delete()
+            .eq('parent_file_id', fileId);
+    } else if (storagePath) {
+        // Delete single file from storage
         await supabase.storage.from('files').remove([storagePath]);
     }
 
-    // Delete metadata
+    // Delete main file metadata
     const { error } = await supabase
         .from('files')
         .delete()
@@ -322,18 +378,52 @@ export const deleteFile = async (fileId: string, storagePath: string | null): Pr
     if (error) throw error;
 };
 
-export const downloadFile = async (storagePath: string, fileName: string): Promise<void> => {
-    const { data, error } = await supabase.storage
-        .from('files')
-        .download(storagePath);
+export const downloadFile = async (file: FileRecord): Promise<void> => {
+    let blob: Blob;
 
-    if (error) throw error;
+    if (file.is_chunked && file.chunk_count) {
+        // Get all chunks in order
+        const { data: chunks, error: chunksError } = await supabase
+            .from('files')
+            .select('*')
+            .eq('parent_file_id', file.id)
+            .order('chunk_index', { ascending: true });
+
+        if (chunksError) throw chunksError;
+        if (!chunks || chunks.length === 0) throw new Error('No chunks found');
+
+        // Download each chunk
+        const chunkBlobs: Blob[] = [];
+        for (const chunk of chunks) {
+            if (!chunk.storage_path) continue;
+
+            const { data, error } = await supabase.storage
+                .from('files')
+                .download(chunk.storage_path);
+
+            if (error) throw error;
+            chunkBlobs.push(data);
+        }
+
+        // Merge chunks back into original file
+        blob = await mergeChunks(chunkBlobs, file.type || 'application/octet-stream');
+    } else if (file.storage_path) {
+        // Download single file
+        const { data, error } = await supabase.storage
+            .from('files')
+            .download(file.storage_path);
+
+        if (error) throw error;
+        blob = data;
+    } else {
+        throw new Error('No storage path found');
+    }
 
     // Create download link
-    const url = URL.createObjectURL(data);
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName;
+    a.download = file.name;
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
