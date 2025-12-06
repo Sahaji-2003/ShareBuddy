@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
-import { Save, Clipboard, ChevronDown, AlertTriangle } from 'lucide-react';
-import { addFile } from '../lib/db';
+import { Save, Clipboard, ChevronDown, AlertTriangle, Loader2 } from 'lucide-react';
+import { uploadFile } from '../lib/db';
 import { useToast } from './ui/Toast';
 
 interface LargeTextCreatorProps {
     repoId: string;
+    projectCode: string;
     onComplete: () => void;
     onCancel: () => void;
 }
@@ -26,56 +27,42 @@ const FILE_FORMATS: FileFormat[] = [
     { id: 'html', name: 'HTML', extension: '.html', mimeType: 'text/html' },
     { id: 'css', name: 'CSS', extension: '.css', mimeType: 'text/css' },
     { id: 'sql', name: 'SQL', extension: '.sql', mimeType: 'text/sql' },
-    { id: 'xml', name: 'XML', extension: '.xml', mimeType: 'text/xml' },
-    { id: 'yaml', name: 'YAML', extension: '.yaml', mimeType: 'text/yaml' },
     { id: 'csv', name: 'CSV', extension: '.csv', mimeType: 'text/csv' },
 ];
 
-// Threshold for when to switch to "large content" mode (100KB)
 const LARGE_CONTENT_THRESHOLD = 100 * 1024;
 
-export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCreatorProps) {
+export function LargeTextCreator({ repoId, projectCode, onComplete, onCancel }: LargeTextCreatorProps) {
     const [filename, setFilename] = useState('');
     const [selectedFormat, setSelectedFormat] = useState<FileFormat>(FILE_FORMATS[0]);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [status, setStatus] = useState<'idle' | 'reading' | 'saving'>('idle');
-
-    // For small content - we show it in textarea
     const [textContent, setTextContent] = useState('');
-
-    // For large content - we store as blob and only show preview
     const [contentBlob, setContentBlob] = useState<Blob | null>(null);
     const [isLargeContent, setIsLargeContent] = useState(false);
     const [lineCount, setLineCount] = useState<number>(0);
     const [preview, setPreview] = useState<string>('');
-
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const { showToast } = useToast();
 
-    // Handle paste event on textarea - intercept large pastes
     const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const pastedText = e.clipboardData.getData('text');
-
-        // If pasted content is large, prevent default and handle specially
         if (pastedText.length > LARGE_CONTENT_THRESHOLD) {
             e.preventDefault();
             handleLargeContent(pastedText);
         }
-        // Otherwise, let default paste behavior work for small content
     }, [selectedFormat.mimeType]);
 
-    // Handle large content (from paste or clipboard API)
     const handleLargeContent = (text: string) => {
         const blob = new Blob([text], { type: selectedFormat.mimeType });
         setContentBlob(blob);
         setIsLargeContent(true);
         setLineCount(text.split('\n').length);
         setPreview(text.slice(0, 500) + (text.length > 500 ? '\n...' : ''));
-        setTextContent(''); // Clear textarea content
+        setTextContent('');
         showToast(`Large content loaded (${(blob.size / 1024 / 1024).toFixed(2)} MB)`, 'success');
     };
 
-    // Smart paste from clipboard API (for very large content)
     const handleSmartPaste = async () => {
         try {
             setStatus('reading');
@@ -83,17 +70,14 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
             handleLargeContent(text);
             setStatus('idle');
         } catch (err) {
-            console.error('Failed to read clipboard:', err);
-            showToast('Failed to read clipboard. Please grant permission.', 'error');
+            console.error(err);
+            showToast('Failed to read clipboard', 'error');
             setStatus('idle');
         }
     };
 
-    // Handle text change in textarea (only for small content)
     const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const newValue = e.target.value;
-
-        // If content becomes large, switch to blob mode
         if (newValue.length > LARGE_CONTENT_THRESHOLD) {
             handleLargeContent(newValue);
         } else {
@@ -106,8 +90,6 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
     const handleFormatChange = (format: FileFormat) => {
         setSelectedFormat(format);
         setIsDropdownOpen(false);
-
-        // Update blob mime type if content exists
         if (contentBlob) {
             contentBlob.text().then(text => {
                 const newBlob = new Blob([text], { type: format.mimeType });
@@ -145,11 +127,11 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                 fileToSave = new Blob([textContent], { type: selectedFormat.mimeType });
             }
 
-            await addFile(repoId, fileToSave, fullFilename);
+            await uploadFile(projectCode, repoId, fileToSave, fullFilename);
             onComplete();
         } catch (err) {
-            console.error('Failed to save file:', err);
-            showToast('Failed to save file.', 'error');
+            console.error(err);
+            showToast('Failed to save file', 'error');
             setStatus('idle');
         }
     };
@@ -162,14 +144,11 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                 className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-gray-900 p-4 sm:p-6 shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             >
-                <h2 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-bold text-white">
-                    Create Text File
-                </h2>
+                <h2 className="mb-4 sm:mb-6 text-xl sm:text-2xl font-bold text-white">Create Text File</h2>
 
                 <div className="space-y-4">
                     {/* Filename and Format Row */}
                     <div className="flex flex-col sm:flex-row gap-3">
-                        {/* Filename Input */}
                         <div className="flex-1">
                             <label className="mb-2 block text-sm font-medium text-gray-400">Filename</label>
                             <input
@@ -180,7 +159,6 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                             />
                         </div>
 
-                        {/* Format Dropdown */}
                         <div className="sm:w-40">
                             <label className="mb-2 block text-sm font-medium text-gray-400">Format</label>
                             <div className="relative">
@@ -199,8 +177,7 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                                             <button
                                                 key={format.id}
                                                 onClick={() => handleFormatChange(format)}
-                                                className={`w-full px-4 py-2 text-left text-sm hover:bg-white/10 transition-colors ${selectedFormat.id === format.id ? 'bg-blue-500/20 text-blue-400' : 'text-gray-300'
-                                                    }`}
+                                                className={`w-full px-4 py-2 text-left text-sm hover:bg-white/10 transition-colors ${selectedFormat.id === format.id ? 'bg-blue-500/20 text-blue-400' : 'text-gray-300'}`}
                                             >
                                                 <span className="font-medium">{format.extension}</span>
                                                 <span className="ml-2 text-gray-500">{format.name}</span>
@@ -227,7 +204,6 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                         </div>
 
                         {isLargeContent ? (
-                            // Large content preview mode
                             <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-2">
@@ -243,23 +219,19 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                                     <span className="text-gray-500">
                                         Size: {contentBlob ? (contentBlob.size / 1024 / 1024).toFixed(2) : 0} MB
                                     </span>
-                                    <button
-                                        onClick={clearContent}
-                                        className="text-red-400 hover:text-red-300 transition-colors"
-                                    >
+                                    <button onClick={clearContent} className="text-red-400 hover:text-red-300 transition-colors">
                                         Clear
                                     </button>
                                 </div>
                             </div>
                         ) : (
-                            // Normal textarea mode
                             <textarea
                                 ref={textareaRef}
                                 value={textContent}
                                 onChange={handleTextChange}
                                 onPaste={handlePaste}
                                 className="w-full h-48 sm:h-64 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder-gray-500 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
-                                placeholder="Type or paste your content here...&#10;&#10;For very large content (1M+ lines), use the 'Smart Paste' button to avoid browser freezing."
+                                placeholder="Type or paste your content here..."
                             />
                         )}
 
@@ -283,7 +255,11 @@ export function LargeTextCreator({ repoId, onComplete, onCancel }: LargeTextCrea
                             disabled={!hasContent || !filename || status === 'saving'}
                             className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg transition-all hover:bg-blue-500 disabled:opacity-50 disabled:shadow-none"
                         >
-                            <Save className="mr-2 h-4 w-4" />
+                            {status === 'saving' ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <Save className="mr-2 h-4 w-4" />
+                            )}
                             {status === 'saving' ? 'Saving...' : 'Save File'}
                         </button>
                     </div>
