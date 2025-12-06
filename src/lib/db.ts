@@ -29,9 +29,16 @@ export interface FileRecord {
 const STORAGE_LIMIT = 1024 * 1024 * 1024; // 1GB
 const WARNING_THRESHOLD = 0.8; // Warn at 80%
 
-// Generate unique 4-digit code
+// Reserved admin code - never generate this
+const ADMIN_CODE = '1977';
+
+// Generate unique 4-digit code (excluding admin code)
 const generateCode = (): string => {
-    return Math.floor(1000 + Math.random() * 9000).toString();
+    let code: string;
+    do {
+        code = Math.floor(1000 + Math.random() * 9000).toString();
+    } while (code === ADMIN_CODE);
+    return code;
 };
 
 // ==================== STORAGE USAGE ====================
@@ -126,6 +133,31 @@ export const getRepos = async (projectCode: string): Promise<Repo[]> => {
 
     if (error) throw error;
     return data || [];
+};
+
+// Admin: Get ALL repos from all projects
+export const getAllRepos = async (): Promise<Repo[]> => {
+    const { data, error } = await supabase
+        .from('repos')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+};
+
+// Admin: Get total storage usage across all projects
+export const getTotalStorageUsage = async (): Promise<{ used: number; limit: number; percentage: number }> => {
+    const { data, error } = await supabase
+        .from('files')
+        .select('size');
+
+    if (error) throw error;
+
+    const used = data?.reduce((sum, file) => sum + (file.size || 0), 0) || 0;
+    const percentage = (used / STORAGE_LIMIT) * 100;
+
+    return { used, limit: STORAGE_LIMIT, percentage };
 };
 
 export const getRepo = async (repoId: string): Promise<Repo | null> => {

@@ -1,15 +1,20 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderGit2, ArrowRight, Plus, Loader2 } from 'lucide-react';
+import { FolderGit2, ArrowRight, Plus, Loader2, Shield } from 'lucide-react';
 import { createProject, validateProjectCode } from '../lib/db';
 import { useProject } from '../contexts/ProjectContext';
 import { useToast } from '../components/ui/Toast';
+
+const ADMIN_CODE = '1977';
+const ADMIN_PASSWORD = '2003';
 
 export function CodeEntry() {
     const [code, setCode] = useState(['', '', '', '']);
     const [isLoading, setIsLoading] = useState(false);
     const [mode, setMode] = useState<'join' | 'create'>('join');
-    const { setProjectCode } = useProject();
+    const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+    const [adminPassword, setAdminPassword] = useState('');
+    const { setProjectCode, setIsAdmin } = useProject();
     const { showToast } = useToast();
     const navigate = useNavigate();
 
@@ -53,11 +58,18 @@ export function CodeEntry() {
             return;
         }
 
+        // Check for admin code
+        if (fullCode === ADMIN_CODE) {
+            setShowPasswordPrompt(true);
+            return;
+        }
+
         setIsLoading(true);
         try {
             const isValid = await validateProjectCode(fullCode);
             if (isValid) {
                 setProjectCode(fullCode);
+                setIsAdmin(false);
                 showToast('Joined project successfully!', 'success');
                 navigate('/');
             } else {
@@ -68,6 +80,18 @@ export function CodeEntry() {
             showToast('Failed to join project', 'error');
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleAdminLogin = () => {
+        if (adminPassword === ADMIN_PASSWORD) {
+            setProjectCode(ADMIN_CODE);
+            setIsAdmin(true);
+            showToast('Admin access granted', 'success');
+            navigate('/');
+        } else {
+            showToast('Incorrect password', 'error');
+            setAdminPassword('');
         }
     };
 
@@ -106,7 +130,44 @@ export function CodeEntry() {
 
                 {/* Card */}
                 <div className="bg-gray-900/50 border border-white/10 rounded-2xl p-6 backdrop-blur-sm">
-                    {mode === 'join' ? (
+                    {showPasswordPrompt ? (
+                        <>
+                            <div className="flex items-center gap-2 mb-4">
+                                <Shield className="h-5 w-5 text-yellow-500" />
+                                <h2 className="text-lg font-semibold text-white">Access Verification</h2>
+                            </div>
+                            <p className="text-gray-500 text-sm mb-6">Enter password to continue</p>
+
+                            <input
+                                type="password"
+                                value={adminPassword}
+                                onChange={(e) => setAdminPassword(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                                className="w-full h-11 rounded-xl border border-white/10 bg-white/5 px-4 text-center text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 transition-all mb-4"
+                                placeholder="Enter password"
+                                autoFocus
+                            />
+
+                            <button
+                                onClick={handleAdminLogin}
+                                className="w-full flex items-center justify-center gap-2 rounded-xl bg-yellow-600 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-yellow-500"
+                            >
+                                Verify
+                                <ArrowRight className="h-4 w-4" />
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    setShowPasswordPrompt(false);
+                                    setAdminPassword('');
+                                    setCode(['', '', '', '']);
+                                }}
+                                className="w-full mt-3 text-sm text-gray-500 hover:text-gray-400 transition-colors"
+                            >
+                                ← Back
+                            </button>
+                        </>
+                    ) : mode === 'join' ? (
                         <>
                             <h2 className="text-lg font-semibold text-white mb-1">Join a Project</h2>
                             <p className="text-gray-500 text-sm mb-6">Enter the 4-digit project code</p>

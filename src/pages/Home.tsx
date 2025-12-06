@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Folder, Trash2, Loader2, Search } from 'lucide-react';
-import { createRepo, getRepos, deleteRepo, type Repo } from '../lib/db';
+import { Plus, Folder, Trash2, Loader2, Search, Shield } from 'lucide-react';
+import { createRepo, getRepos, deleteRepo, getAllRepos, type Repo } from '../lib/db';
 import { GlassCard } from '../components/ui/GlassCard';
 import { useToast } from '../components/ui/Toast';
 import { useConfirm } from '../components/ui/ConfirmDialog';
@@ -19,13 +19,13 @@ export function Home() {
     const [newRepoDesc, setNewRepoDesc] = useState('');
     const { showToast } = useToast();
     const { confirm } = useConfirm();
-    const { projectCode } = useProject();
+    const { projectCode, isAdmin } = useProject();
 
     useEffect(() => {
         if (projectCode) {
             loadRepos();
         }
-    }, [projectCode]);
+    }, [projectCode, isAdmin]);
 
     useEffect(() => {
         // Filter repos based on search
@@ -35,19 +35,21 @@ export function Home() {
                 repos.filter(
                     (repo) =>
                         repo.name.toLowerCase().includes(query) ||
-                        (repo.description || '').toLowerCase().includes(query)
+                        (repo.description || '').toLowerCase().includes(query) ||
+                        (isAdmin && repo.project_code.includes(query))
                 )
             );
         } else {
             setFilteredRepos(repos);
         }
-    }, [searchQuery, repos]);
+    }, [searchQuery, repos, isAdmin]);
 
     const loadRepos = async () => {
         if (!projectCode) return;
         setIsLoading(true);
         try {
-            const data = await getRepos(projectCode);
+            // Admin sees all repos, regular users see only their project's repos
+            const data = isAdmin ? await getAllRepos() : await getRepos(projectCode);
             setRepos(data);
         } catch (err) {
             console.error(err);
@@ -122,18 +124,31 @@ export function Home() {
             <div className="flex flex-col gap-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-white">Repositories</h1>
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-2xl sm:text-3xl font-bold text-white">
+                                {isAdmin ? 'All Repositories' : 'Repositories'}
+                            </h1>
+                            {isAdmin && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-xs font-medium">
+                                    <Shield className="h-3 w-3" />
+                                    Admin
+                                </span>
+                            )}
+                        </div>
                         <p className="text-gray-500 text-sm mt-1">
                             {repos.length} {repos.length === 1 ? 'repository' : 'repositories'}
+                            {isAdmin && ' (all projects)'}
                         </p>
                     </div>
-                    <button
-                        onClick={() => setIsCreating(true)}
-                        className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-500 active:scale-95"
-                    >
-                        <Plus className="mr-2 h-4 w-4" />
-                        New Repository
-                    </button>
+                    {!isAdmin && (
+                        <button
+                            onClick={() => setIsCreating(true)}
+                            className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-all hover:bg-blue-500 active:scale-95"
+                        >
+                            <Plus className="mr-2 h-4 w-4" />
+                            New Repository
+                        </button>
+                    )}
                 </div>
 
                 {/* Search */}
@@ -216,8 +231,11 @@ export function Home() {
                                 <h3 className="text-lg font-semibold mb-1 text-white truncate">{repo.name}</h3>
                                 <p className="text-sm text-gray-500 line-clamp-2">{repo.description || 'No description'}</p>
                             </div>
-                            <div className="text-xs text-gray-600 pt-3 mt-3 border-t border-white/5">
-                                Created {new Date(repo.created_at).toLocaleDateString()}
+                            <div className="text-xs text-gray-600 pt-3 mt-3 border-t border-white/5 flex justify-between items-center">
+                                <span>Created {new Date(repo.created_at).toLocaleDateString()}</span>
+                                {isAdmin && (
+                                    <span className="font-mono text-yellow-500/70">#{repo.project_code}</span>
+                                )}
                             </div>
                         </GlassCard>
                     </Link>
